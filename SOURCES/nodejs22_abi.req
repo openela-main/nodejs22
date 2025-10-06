@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Require ABI version of the current interpreter
+printf 'nodejs(abi) = %s\n' "$(/usr/bin/node-22 -p 'process.versions.modules')"
