@@ -1,8 +1,8 @@
 ## START: Set by rpmautospec
-## (rpmautospec version 0.6.5)
+## (rpmautospec version 0.8.4)
 ## RPMAUTOSPEC: autorelease, autochangelog
 %define autorelease(e:s:pb:n) %{?-p:0.}%{lua:
-    release_number = 1;
+    release_number = 2;
     base_release_number = tonumber(rpm.expand("%{?-b*}%{!?-b:1}"));
     print(release_number + base_release_number - 1);
 }%{?-e:.%{-e*}}%{?-s:.%{-s*}}%{!?-n:%{?dist}}
@@ -38,6 +38,12 @@
 %bcond_with bundled_zlib
 %endif
 
+# 2026-05-05: Currently libuv up to date, but if it no longer the case - switch to 1
+%bcond bundled_libuv 0
+
+# 2026-05-05: Currently c-ares up to date, but if it no longer the case - switch to 1
+%bcond bundled_cares 0
+
 %bcond bundled_sqlite %{with bootstrap}
 
 # LTO is currently broken on Node.js builds
@@ -62,8 +68,8 @@
 # than a Fedora release lifecycle.
 %global nodejs_epoch 1
 %global nodejs_major 22
-%global nodejs_minor 22
-%global nodejs_patch 2
+%global nodejs_minor 23
+%global nodejs_patch 1
 # nodejs_soversion - from NODE_MODULE_VERSION in src/node_version.h
 %global nodejs_soversion 127
 %global nodejs_abi %{nodejs_soversion}
@@ -86,20 +92,20 @@
 %global v8_release %{nodejs_epoch}.%{nodejs_major}.%{nodejs_minor}.%{nodejs_patch}.%{nodejs_release}
 
 # zlib - from deps/zlib/zlib.h
-%global zlib_version 1.3.0.1-motley
+%global zlib_version 1.3.1
 
 # c-ares - from deps/cares/include/ares_version.h
 # https://github.com/nodejs/node/pull/9332
 %global c_ares_version 1.34.6
 
 # llhttp - from deps/llhttp/include/llhttp.h
-%global llhttp_version 9.3.0
+%global llhttp_version 9.4.2
 
 # libuv - from deps/uv/include/uv/version.h
 %global libuv_version 1.51.0
 
 # nghttp2 - from deps/nghttp2/lib/includes/nghttp2/nghttp2ver.h
-%global nghttp2_version 1.68.1
+%global nghttp2_version 1.69.0
 
 # nghttp3 - from deps/ngtcp2/nghttp3/lib/includes/nghttp3/version.h
 %global nghttp3_version 1.6.0
@@ -130,7 +136,7 @@
 
 # npm - from deps/npm/package.json
 %global npm_epoch 1
-%global npm_version 10.9.7
+%global npm_version 10.9.8
 
 # In order to avoid needing to keep incrementing the release version for the
 # main package forever, we will just construct one for npm that is guaranteed
@@ -147,7 +153,7 @@
 %global histogram_version 0.11.9
 
 # sqlite – from deps/sqlite/sqlite3.h
-%global sqlite_version 3.51.2
+%global sqlite_version 3.51.3
 
 
 Name: nodejs%{nodejs_pkg_major}
@@ -182,8 +188,9 @@ Source301: test-should-pass.txt
 
 Patch: 0001-Remove-unused-OpenSSL-config.patch
 Patch: 0001-fips-disable-options.patch
-Patch: 0001-deps-update-nghttp2-to-1.68.1.patch
 Patch: 0001-CVE-2026-25547-braces-expansion.patch
+# npm deps patches
+Patch: 0002-CVE-2026-42338-npm-ip-address-security-fix.patch
 
 %if 0%{?nodejs_default}
 %global pkgname nodejs
@@ -222,6 +229,11 @@ BuildRequires: jq
 # https://pagure.io/nodejs-packaging/pull-request/10
 BuildRequires: nodejs-packaging
 
+%if %{with bundled_cares}
+Provides:      bundled(c-ares) = %{c_ares_version}
+%else
+BuildRequires: c-ares-devel >= %{c_ares_version}
+%endif
 BuildRequires: chrpath
 BuildRequires: libatomic
 BuildRequires: ninja-build
@@ -251,7 +263,7 @@ Provides: nodejs%{nodejs_pkg_major}%{?1:-%{1}} = %{nodejs_envr}\
 %define unversioned_obsoletes_of_nodejsXX_if_default() %{nil}
 %endif
 
-%if %{with bundled}
+%if %{with bundled_libuv}
 Provides:      bundled(libuv) = %{libuv_version}
 %else
 BuildRequires: libuv-devel >= 1:%{libuv_version}
@@ -330,11 +342,6 @@ Conflicts: node <= 0.3.2-12
 Provides: nodejs-punycode = %{punycode_version}
 Provides: npm(punycode) = %{punycode_version}
 
-# Node.js has forked c-ares from upstream in an incompatible way, so we need
-# to carry the bundled version internally.
-# See https://github.com/nodejs/node/commit/766d063e0578c0f7758c3a965c971763f43fec85
-Provides: bundled(c-ares) = %{c_ares_version}
-
 # Node.js is closely tied to the version of v8 that is used with it. It makes
 # sense to use the bundled version because upstream consistently breaks ABI
 # even in point releases. Node.js upstream has now removed the ability to build
@@ -367,7 +374,7 @@ Requires: nodejs-cjs-module-lexer
 %endif
 
 %if %{with bundled_undici}
-Provides: bundled(nodejs-undici) = 6.24.1
+Provides: bundled(nodejs-undici) = 6.27.0
 %else
 BuildRequires: nodejs-undici
 Requires: nodejs-undici
@@ -407,7 +414,7 @@ Requires: zlib-devel%{?_isa}
 Requires: brotli-devel%{?_isa}
 Requires: nodejs-packaging
 
-%if %{without bundled}
+%if %{without bundled_libuv}
 Requires: libuv-devel%{?_isa}
 %endif
 
@@ -536,6 +543,14 @@ The API documentation for the Node.js JavaScript runtime.
 %autosetup -p1 -n node-v%{nodejs_version}
 
 # remove bundled dependencies that we aren't building
+%if %{without bundled_libuv}
+rm -rf deps/uv
+%endif
+
+%if %{without bundled_cares}
+rm -rf deps/cares
+%endif
+
 %if !%{with bundled_zlib}
 rm -rf deps/zlib
 %endif
@@ -620,7 +635,8 @@ export PATH="${cwd}/.bin:$PATH"
            %{!?with_bundled_undici:--shared-builtin-undici/undici-path %{nodejs_private_sitelib}/undici/loader.js} \
            %{!?with_bundled_sqlite:--shared-sqlite} \
            --shared-brotli \
-           --shared-libuv \
+           %{!?with_bundled_cares:--shared-cares} \
+           %{!?with_bundled_libuv:--shared-libuv} \
            --with-intl=small-icu \
            --with-icu-default-data-dir=%{icudatadir} \
            --without-corepack \
@@ -974,6 +990,17 @@ end
 
 %changelog
 ## START: Generated by rpmautospec
+* Wed Jun 24 2026 tjuhasz <tjuhasz@redhat.com> - 1:22.23.1-2
+- CVE-2026-42338 ip-address HTML escaping fix.
+
+* Wed Jun 24 2026 tjuhasz <tjuhasz@redhat.com> - 1:22.23.1-1
+- Update to version 22.23.1
+
+* Tue May 05 2026 Andrei Radchenko <aradchen@redhat.com> - 1:22.22.2-2
+- De-bundle c-ares, libuv
+- we waited for c-ares for about 4 months, so added conditional flag in
+  case it falls behind in future again, same for libuv
+
 * Mon Mar 30 2026 Andrei Radchenko <aradchen@redhat.com> - 1:22.22.2-1
 - Update to version 22.22.2
 - introduced patch updating deps/nghttp2 to v 1.68.1 for CVE-2026-27135
